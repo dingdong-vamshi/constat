@@ -23,6 +23,7 @@ import {
   Plus,
   Package,
 } from "lucide-react";
+import { OperationsOverview } from "./operations-overview";
 import { useStore } from "./store";
 import { inventory, statistics } from "@/lib/statistics";
 import { displayDate, money, number, shortDate, today } from "@/lib/format";
@@ -351,6 +352,7 @@ export function Dashboard({ projectId }: { projectId: string }) {
         </Link>
       </div>
       <Inventory projectId={projectId} />
+      <OperationsOverview projectId={projectId} from={from} to={to} />
       <div className="quick-actions">
         <span>Quick entry</span>
         <Link href="/diesel">
