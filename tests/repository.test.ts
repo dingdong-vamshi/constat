@@ -72,6 +72,7 @@ describe("Repository and derived statistics", () => {
       ...base,
       id: "consumed",
       type: "Consumed",
+      area: "Foundation",
       quantity: 7,
     };
     repo.save("transactions", consumed);

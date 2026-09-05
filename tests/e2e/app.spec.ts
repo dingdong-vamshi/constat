@@ -48,6 +48,10 @@ test("diesel create, image compression, edit, filter, refresh, delete and dashbo
     .getByLabel("Meter photo", { exact: true })
     .setInputFiles({ name: "meter.png", mimeType: "image/png", buffer: png });
   await expect(page.getByAltText("Meter photo preview")).toBeVisible();
+  await page
+    .getByLabel("Diesel bill photo", { exact: true })
+    .setInputFiles({ name: "bill.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByAltText("Diesel bill photo preview")).toBeVisible();
   await expect(page.locator(".calculation strong")).toHaveText("₹7,600");
   await page.getByRole("button", { name: "Save record", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
