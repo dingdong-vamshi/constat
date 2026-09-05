@@ -5,122 +5,17 @@ import {
   Collection,
   RecordFor,
   schemas,
-  machineTypes,
-  materials,
   units,
   MaterialType,
 } from "@/lib/models";
 import { today, money, number } from "@/lib/format";
+import { newId } from "@/lib/id";
 import { inventory } from "@/lib/statistics";
-import { preparePhoto } from "@/lib/images";
 import { useStore } from "./store";
 import { Button, Field, Modal } from "./ui";
-import { Upload, ImageIcon } from "lucide-react";
+import { PhotoUpload } from "./photo-upload";
+import { fields, FormValues } from "./form-fields";
 import { toast } from "sonner";
-type FormValues = Record<string, string | number>;
-type Config = {
-  key: string;
-  label: string;
-  type?: "date" | "number" | "textarea" | "photo" | "select";
-  options?: readonly string[];
-  optional?: boolean;
-  placeholder?: string;
-};
-const fields: Partial<Record<Collection, Config[]>> = {
-  companies: [
-    {
-      key: "name",
-      label: "Company name",
-      placeholder: "e.g. ABC Constructions",
-    },
-  ],
-  projects: [
-    { key: "name", label: "Project name" },
-    { key: "siteName", label: "Site name" },
-    { key: "location", label: "Location" },
-    { key: "startDate", label: "Start date", type: "date" },
-    {
-      key: "status",
-      label: "Status",
-      type: "select",
-      options: ["Active", "On Hold", "Completed"],
-    },
-    {
-      key: "description",
-      label: "Description",
-      type: "textarea",
-      optional: true,
-    },
-  ],
-  machines: [
-    { key: "name", label: "Machine name", placeholder: "e.g. Excavator 01" },
-    {
-      key: "type",
-      label: "Machine type",
-      type: "select",
-      options: machineTypes,
-    },
-    {
-      key: "identification",
-      label: "Registration / identification",
-      optional: true,
-    },
-    {
-      key: "status",
-      label: "Status",
-      type: "select",
-      options: ["Active", "Maintenance", "Inactive"],
-    },
-  ],
-  diesel: [
-    { key: "date", label: "Date", type: "date" },
-    { key: "machineId", label: "Machine", type: "select" },
-    { key: "litres", label: "Diesel filled (L)", type: "number" },
-    { key: "costPerLitre", label: "Cost per litre (₹)", type: "number" },
-    { key: "meterReading", label: "Meter reading", type: "number" },
-    { key: "photo", label: "Meter photo", type: "photo" },
-    { key: "notes", label: "Notes", type: "textarea", optional: true },
-  ],
-  employees: [
-    { key: "name", label: "Name" },
-    {
-      key: "designation",
-      label: "Designation",
-      placeholder: "e.g. Site Engineer",
-    },
-    { key: "code", label: "Employee code", optional: true },
-    {
-      key: "status",
-      label: "Status",
-      type: "select",
-      options: ["Active", "Inactive"],
-    },
-  ],
-  labour: [
-    { key: "date", label: "Date", type: "date" },
-    { key: "count", label: "Labourers present", type: "number" },
-    { key: "notes", label: "Notes", type: "textarea", optional: true },
-  ],
-  transactions: [
-    { key: "material", label: "Material", type: "select", options: materials },
-    {
-      key: "type",
-      label: "Transaction type",
-      type: "select",
-      options: ["Received", "Consumed"],
-    },
-    { key: "quantity", label: "Quantity", type: "number" },
-    { key: "date", label: "Date", type: "date" },
-    { key: "supplier", label: "Supplier", optional: true },
-    {
-      key: "reference",
-      label: "Invoice / challan / reference",
-      optional: true,
-    },
-    { key: "vehicle", label: "Vehicle number", optional: true },
-    { key: "notes", label: "Notes", type: "textarea", optional: true },
-  ],
-};
 export function RecordForm<K extends Collection>({
   collection,
   record,
@@ -128,6 +23,7 @@ export function RecordForm<K extends Collection>({
   companyId,
   onClose,
   title,
+  defaults = {},
 }: {
   collection: K;
   record?: RecordFor<K>;
@@ -135,32 +31,55 @@ export function RecordForm<K extends Collection>({
   companyId: string;
   onClose: () => void;
   title: string;
+  defaults?: FormValues;
 }) {
   const { db, repo } = useStore();
-  const [busy, setBusy] = useState(false);
-  const [photoError, setPhotoError] = useState("");
+  const [busyCount, setBusyCount] = useState(0);
   const [saveError, setSaveError] = useState("");
   const config = fields[collection] ?? [];
   const initial: FormValues = {};
   for (const f of config)
     initial[f.key] =
-      f.type === "date"
+      f.type === "date" && !f.optional
         ? today()
-        : f.type === "select"
+        : f.type === "select" && !f.optional
           ? (f.options?.[0] ?? "")
           : "";
+  if (collection === "storeItems") initial.unit = "Nos";
+  Object.assign(initial, defaults);
   if (record)
     for (const [key, value] of Object.entries(record))
       if (typeof value === "string" || typeof value === "number")
         initial[key] = value;
-  const stamp = new Date().toISOString();
-  const meta = {
-    id: record?.id ?? crypto.randomUUID(),
-    createdAt: record?.createdAt ?? stamp,
-    updatedAt: stamp,
-    projectId,
-    companyId,
-  };
+  const [id] = useState(() => record?.id ?? newId());
+  function payload(values: FormValues) {
+    const stamp = new Date().toISOString();
+    const data: Record<string, unknown> = {
+      ...values,
+      id,
+      createdAt: record?.createdAt ?? stamp,
+      updatedAt: stamp,
+      projectId,
+      companyId,
+    };
+    if (collection === "diesel") data.legacyMissingBill = false;
+    if (collection === "transactions") {
+      data.legacyAreaMissing = false;
+      if (data.material !== "Steel" || data.type !== "Consumed") data.area = "";
+    }
+    if (collection === "storeUsage" && data.used === "No") {
+      data.quantity = null;
+      data.team = "";
+      data.workArea = "";
+    }
+    if (collection === "accounts")
+      data.entryNumber =
+        record && "entryNumber" in record ? record.entryNumber : "AUTO";
+    if (collection === "issues" && data.status !== "Resolved") {
+      data.resolvedDate = "";
+    }
+    return data;
+  }
   const {
     register,
     handleSubmit,
@@ -170,19 +89,48 @@ export function RecordForm<K extends Collection>({
   } = useForm<FormValues>({
     defaultValues: initial,
     resolver: async (values) => {
-      const parsed = schemas[collection].safeParse({ ...values, ...meta });
-      if (parsed.success) return { values, errors: {} };
-      const issues: FieldErrors<FormValues> = {};
-      for (const issue of parsed.error.issues) {
-        const key = String(issue.path[0]);
-        issues[key] = { type: "validation", message: issue.message };
-      }
-      return { values: {}, errors: issues };
+      const result = schemas[collection].safeParse(payload(values));
+      if (result.success) return { values, errors: {} };
+      const errs: FieldErrors<FormValues> = {};
+      for (const issue of result.error.issues)
+        errs[String(issue.path[0])] = {
+          type: "validation",
+          message: issue.message,
+        };
+      return { values: {}, errors: errs };
     },
   });
   const values = useWatch({ control });
-  const photo = String(values.photo ?? "");
   const material = values.material as MaterialType;
+  const choices = (key: string) => {
+    const source =
+      key === "machineId"
+        ? db.machines
+        : key === "storeItemId"
+          ? db.storeItems
+          : key === "activityId"
+            ? db.workActivities
+            : key === "categoryId"
+              ? db.accountCategories
+              : [];
+    return source
+      .filter(
+        (r) =>
+          r.projectId === projectId &&
+          (collection === "issues" ||
+            r.status === "Active" ||
+            r.id === values[key]),
+      )
+      .map((r) => ({
+        id: r.id,
+        name:
+          r.name +
+          ("specification" in r && r.specification
+            ? ` · ${r.specification}`
+            : "") +
+          (r.status !== "Active" ? ` · ${r.status}` : ""),
+      }));
+  };
   const submit = handleSubmit((values) => {
     try {
       setSaveError("");
@@ -202,7 +150,7 @@ export function RecordForm<K extends Collection>({
       }
       repo.save(
         collection,
-        schemas[collection].parse({ ...values, ...meta }) as RecordFor<K>,
+        schemas[collection].parse(payload(values)) as RecordFor<K>,
       );
       toast.success(record ? "Changes saved." : "Record added.");
       onClose();
@@ -212,101 +160,112 @@ export function RecordForm<K extends Collection>({
       );
     }
   });
-  async function upload(file?: File) {
-    if (!file) return;
-    setBusy(true);
-    setPhotoError("");
-    try {
-      setValue("photo", await preparePhoto(file), { shouldValidate: true });
-    } catch (e) {
-      setPhotoError(e instanceof Error ? e.message : "Unable to upload photo.");
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <Modal open onClose={onClose} title={title}>
-      <form onSubmit={submit} noValidate>
+      <form className="record-form" onSubmit={submit} noValidate>
         <div className="form-fields">
-          {config.map((f) => (
-            <Field
-              key={f.key}
-              label={
-                f.key === "quantity" && material
-                  ? `Quantity (${units[material]})`
-                  : f.label
-              }
-              required={!f.optional}
-              error={errors[f.key]?.message as string | undefined}
-            >
-              {f.type === "select" ? (
-                <select {...register(f.key)}>
-                  <option value="" disabled>
-                    Select {f.label.toLowerCase()}
-                  </option>
-                  {f.key === "machineId"
-                    ? db.machines
-                        .filter((m) => m.projectId === projectId)
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                            {m.status !== "Active" ? ` · ${m.status}` : ""}
+          {collection === "accounts" && (
+            <p className="hint">
+              Entry number:{" "}
+              {record && "entryNumber" in record
+                ? record.entryNumber
+                : "Assigned automatically when saved"}
+              . Site accounts are entered separately from diesel and material
+              logs; they are not added automatically.
+            </p>
+          )}
+          {record &&
+            (("legacyMissingBill" in record && record.legacyMissingBill) ||
+              ("legacyAreaMissing" in record && record.legacyAreaMissing)) && (
+              <p className="info-note">
+                This older record has a missing bill or consumption area.
+                Complete the new required field before saving changes.
+              </p>
+            )}
+          {config
+            .filter(
+              (f) =>
+                (!f.visible || f.visible(values)) &&
+                !(
+                  defaults.material === "Steel" &&
+                  ["material", "type"].includes(f.key)
+                ),
+            )
+            .map((f) => (
+              <Field
+                key={f.key}
+                label={
+                  f.key === "quantity" && material
+                    ? `Quantity (${units[material]})`
+                    : f.label
+                }
+                required={!f.optional}
+                error={errors[f.key]?.message as string | undefined}
+              >
+                {f.type === "select" ? (
+                  <select
+                    aria-invalid={!!errors[f.key]}
+                    {...register(f.key, {
+                      onChange: (e) => {
+                        if (f.key === "activityId") {
+                          const activity = db.workActivities.find(
+                            (r) => r.id === e.target.value,
+                          );
+                          setValue("unit", activity?.defaultUnit ?? "");
+                        }
+                      },
+                    })}
+                  >
+                    <option value="" disabled={!f.optional}>
+                      {f.optional ? "None" : `Select ${f.label.toLowerCase()}`}
+                    </option>
+                    {f.options
+                      ? f.options.map((o) => <option key={o}>{o}</option>)
+                      : choices(f.key).map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name}
                           </option>
-                        ))
-                    : f.options?.map((o) => <option key={o}>{o}</option>)}
-                </select>
-              ) : f.type === "textarea" ? (
-                <textarea
-                  {...register(f.key)}
-                  rows={3}
-                  placeholder="Optional details…"
-                />
-              ) : f.type === "photo" ? (
-                <span className="upload-box">
-                  {photo ? (
-                    <img src={photo} alt="Meter photo preview" />
-                  ) : (
-                    <ImageIcon size={25} />
-                  )}
-                  <span className="upload-text">
-                    <Upload size={16} />
-                    {busy
-                      ? "Processing photo…"
-                      : photo
-                        ? "Replace meter photo"
-                        : "Upload meter photo"}
-                  </span>
-                  <input
-                    aria-label="Meter photo"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    disabled={busy}
-                    onChange={(e) => upload(e.target.files?.[0])}
+                        ))}
+                  </select>
+                ) : f.type === "textarea" ? (
+                  <textarea
+                    aria-invalid={!!errors[f.key]}
+                    {...register(f.key)}
+                    rows={3}
+                    placeholder={
+                      f.optional ? "Optional details…" : "Describe briefly…"
+                    }
                   />
-                  <small>JPG, PNG or WebP · Compressed automatically</small>
-                  {photoError && (
-                    <small className="field-error" role="alert">
-                      {photoError}
-                    </small>
-                  )}
-                </span>
-              ) : (
-                <input
-                  type={f.type ?? "text"}
-                  step={f.key === "count" ? "1" : "any"}
-                  placeholder={
-                    f.placeholder ?? (f.type === "number" ? "0" : undefined)
-                  }
-                  {...register(f.key, { valueAsNumber: f.type === "number" })}
-                />
-              )}
-            </Field>
-          ))}
+                ) : f.type === "photo" ? (
+                  <PhotoUpload
+                    label={f.label}
+                    value={String(values[f.key] ?? "")}
+                    optional={f.optional}
+                    onChange={(v) =>
+                      setValue(f.key, v, { shouldValidate: true })
+                    }
+                    onBusyChange={(busy) =>
+                      setBusyCount((n) => n + (busy ? 1 : -1))
+                    }
+                  />
+                ) : (
+                  <input
+                    aria-invalid={!!errors[f.key]}
+                    type={f.type ?? "text"}
+                    step={f.key === "count" ? "1" : "any"}
+                    placeholder={
+                      f.placeholder ?? (f.type === "number" ? "0" : undefined)
+                    }
+                    {...register(f.key, { valueAsNumber: f.type === "number" })}
+                  />
+                )}
+              </Field>
+            ))}
           {collection === "diesel" && (
             <div className="calculation">
               <span>
                 {number(Number(values.litres) || 0)} L ×{" "}
-                {money(Number(values.costPerLitre) || 0)}
+                {money(Number(values.costPerLitre) || 0)}/L
               </span>
               <strong>
                 {money(
@@ -324,8 +283,14 @@ export function RecordForm<K extends Collection>({
                 inventory(db, projectId).find((r) => r.material === material)
                   ?.available ?? 0,
               )}{" "}
-              {units[material]}. Stock is calculated from all recorded
-              transactions.
+              {units[material]}. Calculated from all transactions.
+            </p>
+          )}
+          {collection === "storeUsage" && (
+            <p className="hint">
+              Daily usage does not reduce owned inventory.
+              {values.storeItemId &&
+                ` Owned: ${db.storeItems.find((r) => r.id === values.storeItemId)?.totalQuantity} ${db.storeItems.find((r) => r.id === values.storeItemId)?.unit}.`}
             </p>
           )}
           {saveError && (
@@ -338,7 +303,7 @@ export function RecordForm<K extends Collection>({
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || isSubmitting}>
+          <Button type="submit" disabled={busyCount > 0 || isSubmitting}>
             {record ? "Save changes" : "Save record"}
           </Button>
         </div>
