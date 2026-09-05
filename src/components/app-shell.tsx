@@ -244,7 +244,12 @@ export function AppShell() {
               <span className="logo-mark" aria-hidden="true">
                 C<span />
               </span>
-              <span className="mobile-brand-name">ConStat</span>
+              <span className="mobile-brand-copy">
+                <span className="mobile-brand-name">ConStat</span>
+                <span className="mobile-brand-tagline">
+                  Construction Statistics
+                </span>
+              </span>
             </Link>
             <span className="desktop-breadcrumb">Workspace</span>
             <ChevronRight className="desktop-breadcrumb" size={14} />

@@ -1764,8 +1764,24 @@ td strong {
     background: #fff;
   }
   .mobile-brand-name {
+    display: block;
+    line-height: 19px;
     font-size: 17px;
     font-weight: 700;
     letter-spacing: -0.6px;
+  }
+}
+
+@media (max-width: 850px) {
+  .mobile-brand-tagline {
+    display: block;
+    margin-top: 2px;
+    color: #666;
+    font-size: 7px;
+    font-weight: 600;
+    line-height: 10px;
+    letter-spacing: 0.45px;
+    text-transform: uppercase;
+    white-space: nowrap;
   }
 }
