@@ -1,3 +1,9 @@
+import { migrateDatabase } from "./migrations";
+import { projectCollections, validateOperations } from "./operations-integrity";
+import { canWrite, TestingRole } from "./permissions";
+import { newId } from "./id";
+import { addProjectDefaults } from "./project-defaults";
+import { today } from "./format";
 import {
   Collection,
   Database,
@@ -22,7 +28,7 @@ export class BrowserStorage implements StorageAdapter {
   }
 }
 export function validateDatabase(input: unknown): Database {
-  const db = databaseSchema.parse(input);
+  const db = databaseSchema.parse(migrateDatabase(input));
   const unique = (values: string[], message: string) => {
     if (new Set(values).size !== values.length) throw new Error(message);
   };
@@ -38,14 +44,7 @@ export function validateDatabase(input: unknown): Database {
   for (const p of db.projects)
     if (!companies.has(p.companyId))
       throw new Error("Project company does not exist.");
-  for (const key of [
-    "machines",
-    "diesel",
-    "employees",
-    "attendance",
-    "labour",
-    "transactions",
-  ] as const)
+  for (const key of projectCollections)
     for (const r of db[key])
       if (!projects.has(r.projectId))
         throw new Error("Record project does not exist.");
@@ -77,9 +76,20 @@ export function validateDatabase(input: unknown): Database {
         throw new Error(
           `Only ${Math.max(0, row.received)} received for ${row.material}. This change would leave stock below zero. Reduce consumption or add a receipt first.`,
         );
+  validateOperations(db);
   return db;
 }
 export class Repository {
+  private role: TestingRole = "Super Admin";
+  setRole(role: TestingRole) {
+    this.role = role;
+  }
+  private assertWrite(collection: Collection) {
+    if (!canWrite(this.role, collection))
+      throw new Error(
+        "Switch to Super Admin to configure master data. This is a local testing role.",
+      );
+  }
   private db: Database = emptyDatabase();
   private listeners = new Set<() => void>();
   constructor(private storage: StorageAdapter) {}
@@ -105,6 +115,11 @@ export class Repository {
     this.emit();
   }
   replace(input: unknown) {
+    if (this.role !== "Super Admin")
+      throw new Error("Switch to Super Admin to replace application data.");
+    this.commit(input);
+  }
+  private commit(input: unknown) {
     const next = validateDatabase(input);
     try {
       this.storage.write(JSON.stringify(next));
@@ -117,14 +132,51 @@ export class Repository {
     this.emit();
   }
   save<K extends Collection>(collection: K, record: RecordFor<K>) {
+    this.assertWrite(collection);
     const next = structuredClone(this.db);
+    if (collection === "accounts") {
+      const entry = record as RecordFor<"accounts">;
+      const existing = next.accounts.find((r) => r.id === entry.id);
+      if (existing)
+        record = {
+          ...entry,
+          entryNumber: existing.entryNumber,
+        } as RecordFor<K>;
+      else {
+        const project = next.projects.find((p) => p.id === entry.projectId);
+        if (!project) throw new Error("Select a project first.");
+        const highest = Math.max(
+          0,
+          ...next.accounts
+            .filter((r) => r.projectId === entry.projectId)
+            .map((r) => Number(r.entryNumber.replace("SITE-", "")) || 0),
+        );
+        const sequence = Math.max(project.nextAccountNumber, highest + 1);
+        record = {
+          ...entry,
+          entryNumber: `SITE-${String(sequence).padStart(4, "0")}`,
+        } as RecordFor<K>;
+        project.nextAccountNumber = sequence + 1;
+      }
+    }
+    if (collection === "issues") {
+      const issue = record as RecordFor<"issues">;
+      record = {
+        ...issue,
+        resolvedDate:
+          issue.status === "Resolved" ? issue.resolvedDate || today() : "",
+      } as RecordFor<K>;
+    }
     const rows = next[collection] as RecordFor<K>[];
     const index = rows.findIndex((r) => r.id === record.id);
-    if (index === -1) rows.push(record);
-    else rows[index] = record;
-    this.replace(next);
+    if (index === -1) {
+      rows.push(record);
+      if (collection === "projects") addProjectDefaults(next, record.id);
+    } else rows[index] = record;
+    this.commit(next);
   }
   remove(collection: Collection, id: string) {
+    this.assertWrite(collection);
     const next = structuredClone(this.db);
     if (
       collection === "machines" &&
@@ -132,6 +184,33 @@ export class Repository {
     )
       throw new Error(
         "This machine has diesel entries. Delete its diesel entries before deleting the machine.",
+      );
+    if (
+      collection === "machines" &&
+      next.issues.some((r) => r.machineId === id)
+    )
+      throw new Error(
+        "This machine is linked to a site issue. Unlink it before deleting.",
+      );
+    if (
+      collection === "storeItems" &&
+      (next.storeUsage.some((r) => r.storeItemId === id) ||
+        next.issues.some((r) => r.storeItemId === id))
+    )
+      throw new Error(
+        "This item has usage or issue history. Deactivate it instead, or remove its references first.",
+      );
+    if (
+      collection === "workActivities" &&
+      next.workLogs.some((r) => r.activityId === id)
+    )
+      throw new Error("This activity has work entries. Deactivate it instead.");
+    if (
+      collection === "accountCategories" &&
+      next.accounts.some((r) => r.categoryId === id)
+    )
+      throw new Error(
+        "This category has account entries. Deactivate it instead.",
       );
     if (collection === "employees")
       next.attendance = next.attendance.filter((r) => r.employeeId !== id);
@@ -145,13 +224,7 @@ export class Repository {
       );
       next.projects = next.projects.filter((r) => !projectIds.has(r.id));
       const removeProjectRecords = <
-        K extends
-          | "machines"
-          | "diesel"
-          | "employees"
-          | "attendance"
-          | "labour"
-          | "transactions",
+        K extends (typeof projectCollections)[number],
       >(
         key: K,
       ) => {
@@ -159,22 +232,28 @@ export class Repository {
           (r) => !projectIds.has(r.projectId),
         ) as Database[K];
       };
-      for (const key of [
-        "machines",
-        "diesel",
-        "employees",
-        "attendance",
-        "labour",
-        "transactions",
-      ] as const)
-        removeProjectRecords(key);
+      for (const key of projectCollections) removeProjectRecords(key);
     }
     // Assign through a generic helper to preserve each collection's record type.
     const filter = <K extends Collection>(key: K) => {
       next[key] = next[key].filter((r) => r.id !== id) as Database[K];
     };
     filter(collection);
-    this.replace(next);
+    this.commit(next);
+  }
+  clearAttendance(projectId: string, date: string) {
+    this.commit({
+      ...this.db,
+      attendance: this.db.attendance.filter(
+        (r) => r.projectId !== projectId || r.date !== date,
+      ),
+    });
+  }
+  initializeProjectMasters(projectId: string) {
+    this.assertWrite("projects");
+    const next = structuredClone(this.db);
+    addProjectDefaults(next, projectId);
+    this.commit(next);
   }
   saveAttendance(
     projectId: string,
@@ -198,13 +277,13 @@ export class Repository {
         ...entry,
         projectId,
         date,
-        id: old?.id ?? crypto.randomUUID(),
+        id: old?.id ?? newId(),
         createdAt: old?.createdAt ?? stamp,
         updatedAt: stamp,
       };
       next.attendance = next.attendance.filter((r) => r.id !== record.id);
       next.attendance.push(record);
     }
-    this.replace(next);
+    this.commit(next);
   }
 }
