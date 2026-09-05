@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Pencil, Trash2, Eye, Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
+  consumptionAreas,
   Collection,
   Database,
   Machine,
@@ -27,6 +28,8 @@ import {
   Table,
 } from "./ui";
 import { RecordForm } from "./record-form";
+import { canWrite } from "@/lib/permissions";
+import { ConsumptionSummary } from "./consumption-summary";
 import { DateRange } from "./filters";
 type Kind = "machines" | "diesel" | "employees" | "labour" | "transactions";
 type Row =
@@ -66,10 +69,12 @@ export function RowActions({
   onView,
   onEdit,
   onDelete,
+  disabled = false,
 }: {
   onView?: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="row-actions">
@@ -83,22 +88,28 @@ export function RowActions({
           <Eye size={16} />
         </button>
       )}
-      <button
-        className="icon-button"
-        title="Edit record"
-        aria-label="Edit record"
-        onClick={onEdit}
-      >
-        <Pencil size={16} />
-      </button>
-      <button
-        className="icon-button delete-button"
-        title="Delete record"
-        aria-label="Delete record"
-        onClick={onDelete}
-      >
-        <Trash2 size={16} />
-      </button>
+      {onEdit && (
+        <button
+          disabled={disabled}
+          className="icon-button"
+          title="Edit record"
+          aria-label="Edit record"
+          onClick={onEdit}
+        >
+          <Pencil size={16} />
+        </button>
+      )}
+      {onDelete && (
+        <button
+          disabled={disabled}
+          className="icon-button delete-button"
+          title="Delete record"
+          aria-label="Delete record"
+          onClick={onDelete}
+        >
+          <Trash2 size={16} />
+        </button>
+      )}
     </div>
   );
 }
@@ -120,7 +131,17 @@ export function RecordDetails({
     >
       <dl className="details">
         {Object.entries(row)
-          .filter(([k]) => !["id", "projectId", "photo"].includes(k))
+          .filter(
+            ([k]) =>
+              ![
+                "id",
+                "projectId",
+                "photo",
+                "billPhoto",
+                "legacyMissingBill",
+                "legacyAreaMissing",
+              ].includes(k),
+          )
           .map(([k, v]) => (
             <div key={k}>
               <dt>{k.replace(/([A-Z])/g, " $1")}</dt>
@@ -148,6 +169,19 @@ export function RecordDetails({
           </div>
         )}
       </dl>
+      {"billPhoto" in row &&
+        (row.billPhoto ? (
+          <>
+            <h2>Diesel bill</h2>
+            <img
+              className="large-photo"
+              src={row.billPhoto}
+              alt="Diesel bill"
+            />
+          </>
+        ) : (
+          <p className="hint">Bill missing on this older record.</p>
+        ))}
       {"photo" in row && (
         <img className="large-photo" src={row.photo} alt="Saved meter photo" />
       )}
@@ -158,12 +192,16 @@ export function RecordsPage({
   kind,
   projectId,
   companyId,
+  steelOnly = false,
 }: {
   kind: Kind;
   projectId: string;
   companyId: string;
+  steelOnly?: boolean;
 }) {
-  const { db, repo } = useStore();
+  const { db, repo, role } = useStore();
+  const writable = canWrite(role, kind);
+  const [area, setArea] = useState("");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -174,11 +212,23 @@ export function RecordsPage({
   const [deleting, setDeleting] = useState<Row | null>(null);
   const [view, setView] = useState<Row | null>(null);
   const [photo, setPhoto] = useState("");
-  const [title, description, singular] = titles[kind];
+  const [title, description, singular] = steelOnly
+    ? [
+        "Steel Consumption",
+        "Track where steel is consumed. Entries share the main material inventory.",
+        "Steel Consumption",
+      ]
+    : titles[kind];
   const add = () => setEditing("new");
   const machineFor = (id: string) => db.machines.find((m) => m.id === id);
   const rows = (db[kind] as Row[])
     .filter((r) => r.projectId === projectId)
+    .filter(
+      (r) =>
+        !steelOnly ||
+        ("material" in r && r.material === "Steel" && r.type === "Consumed"),
+    )
+    .filter((r) => !area || ("area" in r && r.area === area))
     .filter((r) => !("date" in r) || inRange(r.date, from, to))
     .filter(
       (r) =>
@@ -186,9 +236,14 @@ export function RecordsPage({
         Object.entries(r)
           .filter(
             ([k]) =>
-              !["photo", "projectId", "createdAt", "updatedAt", "id"].includes(
-                k,
-              ),
+              ![
+                "photo",
+                "billPhoto",
+                "projectId",
+                "createdAt",
+                "updatedAt",
+                "id",
+              ].includes(k),
           )
           .some(([, v]) =>
             String(v).toLowerCase().includes(search.toLowerCase()),
@@ -214,8 +269,8 @@ export function RecordsPage({
   const actions = (r: Row) => (
     <RowActions
       onView={() => setView(r)}
-      onEdit={() => setEditing(r)}
-      onDelete={() => setDeleting(r)}
+      onEdit={writable ? () => setEditing(r) : undefined}
+      onDelete={writable ? () => setDeleting(r) : undefined}
     />
   );
   const columns: { title: string; render: (r: Row) => React.ReactNode }[] =
@@ -363,6 +418,31 @@ export function RecordsPage({
                   render: (r) => (r as MaterialTransaction).reference || "—",
                 },
               ];
+  if (kind === "diesel")
+    columns.push({
+      title: "Bill",
+      render: (r) =>
+        (r as DieselLog).billPhoto ? (
+          <button
+            className="photo-button"
+            aria-label="Preview diesel bill"
+            onClick={() => setPhoto((r as DieselLog).billPhoto)}
+          >
+            <img src={(r as DieselLog).billPhoto} alt="Diesel bill" />
+          </button>
+        ) : (
+          <span className="hint">Missing (legacy)</span>
+        ),
+    });
+  if (kind === "transactions")
+    columns.push({
+      title: "Consumption area",
+      render: (r) =>
+        (r as MaterialTransaction).area ||
+        ((r as MaterialTransaction).legacyAreaMissing
+          ? "Unclassified (legacy)"
+          : "—"),
+    });
   columns.push({ title: "Actions", render: actions });
   const litres =
       kind === "diesel"
@@ -381,12 +461,20 @@ export function RecordsPage({
         title={title}
         description={description}
         action={
-          <Button onClick={add}>
+          <Button onClick={add} disabled={!writable}>
             <Plus size={16} />
             Add {singular}
           </Button>
         }
       />
+      {steelOnly && (
+        <ConsumptionSummary
+          projectId={projectId}
+          from={from}
+          to={to}
+          area={area}
+        />
+      )}
       {kind === "diesel" && (
         <div className="stats-grid three">
           <Stat
@@ -407,6 +495,18 @@ export function RecordsPage({
         </div>
       )}
       <div className="filters">
+        {steelOnly && (
+          <select
+            aria-label="Filter consumption area"
+            value={area}
+            onChange={(e) => setArea(e.target.value)}
+          >
+            <option value="">All consumption areas</option>
+            {consumptionAreas.map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
+        )}
         <SearchInput
           value={search}
           onChange={setSearch}
@@ -445,7 +545,7 @@ export function RecordsPage({
             ))}
           </select>
         )}
-        {kind === "transactions" && (
+        {kind === "transactions" && !steelOnly && (
           <select
             aria-label="Filter material"
             value={material}
@@ -479,7 +579,7 @@ export function RecordsPage({
         columns={columns}
         empty={`No ${title.toLowerCase()} records found.`}
         action={
-          <Button variant="secondary" onClick={add}>
+          <Button variant="secondary" onClick={add} disabled={!writable}>
             Add {singular}
           </Button>
         }
@@ -528,6 +628,9 @@ export function RecordsPage({
       )}
       {editing && (
         <RecordForm
+          defaults={
+            steelOnly ? { material: "Steel", type: "Consumed" } : undefined
+          }
           collection={kind}
           projectId={projectId}
           companyId={companyId}
