@@ -13,34 +13,33 @@ export const units: Record<MaterialType, string> = {
   "Fine Aggregate": "m³",
 };
 export type MaterialType = (typeof materials)[number];
-const required = z.string().trim().min(1, "This field is required.").max(200);
-const optional = z.string().trim().max(2000).default("");
-export const daySchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid date.")
-  .refine((v) => {
-    const d = new Date(v + "T12:00:00");
-    return (
-      !Number.isNaN(+d) &&
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` ===
-        v
-    );
-  }, "Choose a valid date.");
-const positive = z
-  .number()
-  .finite()
-  .positive("Must be greater than zero.")
-  .max(1e9);
-const base = {
-  id: required,
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-};
-const projectBase = { ...base, projectId: required };
+import {
+  required,
+  optional,
+  positive,
+  base,
+  projectBase,
+  daySchema,
+  photoSchema,
+  optionalPhoto,
+  consumptionAreas,
+} from "./schema-fields";
+import {
+  storeItemSchema,
+  storeUsageSchema,
+  workActivitySchema,
+  workLogSchema,
+  accountCategorySchema,
+  accountSchema,
+  issueSchema,
+  concreteSchema,
+} from "./operations-models";
+export { daySchema, photoSchema, consumptionAreas } from "./schema-fields";
 export const companySchema = z.object({ ...base, name: required });
 export const projectSchema = z.object({
   ...base,
   companyId: required,
+  nextAccountNumber: z.number().int().positive().default(1),
   name: required,
   siteName: required,
   location: required,
@@ -55,23 +54,27 @@ export const machineSchema = z.object({
   identification: optional,
   status: z.enum(["Active", "Maintenance", "Inactive"]),
 });
-export const photoSchema = z
-  .string()
-  .max(450000, "Photo is too large. Please choose a smaller image.")
-  .regex(
-    /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/,
-    "Upload a valid meter photo.",
-  );
-export const dieselSchema = z.object({
-  ...projectBase,
-  machineId: required,
-  date: daySchema,
-  litres: positive,
-  costPerLitre: positive,
-  meterReading: z.number().finite().min(0).max(1e12),
-  photo: photoSchema,
-  notes: optional,
-});
+export const dieselSchema = z
+  .object({
+    ...projectBase,
+    machineId: required,
+    date: daySchema,
+    litres: positive,
+    costPerLitre: positive,
+    meterReading: z.number().finite().min(0).max(1e12),
+    photo: photoSchema,
+    billPhoto: optionalPhoto,
+    legacyMissingBill: z.boolean().default(false),
+    notes: optional,
+  })
+  .superRefine((r, ctx) => {
+    if (!r.billPhoto && !r.legacyMissingBill)
+      ctx.addIssue({
+        code: "custom",
+        path: ["billPhoto"],
+        message: "Upload the diesel bill photo.",
+      });
+  });
 export const employeeSchema = z.object({
   ...projectBase,
   name: required,
@@ -92,19 +95,41 @@ export const labourSchema = z.object({
   count: z.number().int("Enter a whole number.").min(0).max(100000),
   notes: optional,
 });
-export const materialSchema = z.object({
-  ...projectBase,
-  material: z.enum(materials),
-  type: z.enum(["Received", "Consumed"]),
-  quantity: positive,
-  date: daySchema,
-  supplier: optional,
-  reference: optional,
-  vehicle: optional,
-  notes: optional,
-});
+export const materialSchema = z
+  .object({
+    ...projectBase,
+    material: z.enum(materials),
+    type: z.enum(["Received", "Consumed"]),
+    quantity: positive,
+    date: daySchema,
+    supplier: optional,
+    reference: optional,
+    vehicle: optional,
+    area: z.union([z.literal(""), z.enum(consumptionAreas)]).default(""),
+    legacyAreaMissing: z.boolean().default(false),
+    notes: optional,
+  })
+  .superRefine((r, ctx) => {
+    if (
+      r.material === "Steel" &&
+      r.type === "Consumed" &&
+      !r.area &&
+      !r.legacyAreaMissing
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["area"],
+        message: "Select the steel consumption area.",
+      });
+    if ((r.material !== "Steel" || r.type !== "Consumed") && r.area)
+      ctx.addIssue({
+        code: "custom",
+        path: ["area"],
+        message: "Consumption area only applies to steel consumed.",
+      });
+  });
 export const databaseSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   companies: z.array(companySchema),
   projects: z.array(projectSchema),
   machines: z.array(machineSchema),
@@ -113,6 +138,14 @@ export const databaseSchema = z.object({
   attendance: z.array(attendanceSchema),
   labour: z.array(labourSchema),
   transactions: z.array(materialSchema),
+  storeItems: z.array(storeItemSchema),
+  storeUsage: z.array(storeUsageSchema),
+  workActivities: z.array(workActivitySchema),
+  workLogs: z.array(workLogSchema),
+  accountCategories: z.array(accountCategorySchema),
+  accounts: z.array(accountSchema),
+  issues: z.array(issueSchema),
+  concrete: z.array(concreteSchema),
 });
 export type Database = z.infer<typeof databaseSchema>;
 export type Company = z.infer<typeof companySchema>;
@@ -134,9 +167,17 @@ export const schemas = {
   attendance: attendanceSchema,
   labour: labourSchema,
   transactions: materialSchema,
+  storeItems: storeItemSchema,
+  storeUsage: storeUsageSchema,
+  workActivities: workActivitySchema,
+  workLogs: workLogSchema,
+  accountCategories: accountCategorySchema,
+  accounts: accountSchema,
+  issues: issueSchema,
+  concrete: concreteSchema,
 };
 export const emptyDatabase = (): Database => ({
-  version: 1,
+  version: 2,
   companies: [],
   projects: [],
   machines: [],
@@ -145,4 +186,12 @@ export const emptyDatabase = (): Database => ({
   attendance: [],
   labour: [],
   transactions: [],
+  storeItems: [],
+  storeUsage: [],
+  workActivities: [],
+  workLogs: [],
+  accountCategories: [],
+  accounts: [],
+  issues: [],
+  concrete: [],
 });
