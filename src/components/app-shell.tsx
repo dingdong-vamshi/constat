@@ -18,12 +18,19 @@ import {
   Building2,
   X,
   ClipboardCheck,
+  Warehouse,
+  NotebookPen,
+  Wallet,
+  CircleAlert,
+  Weight,
+  Boxes,
 } from "lucide-react";
 import { useStore } from "./store";
 import { Dashboard, InventoryPage } from "./dashboard";
 import { RecordsPage } from "./records";
 import { AttendancePage } from "./attendance";
 import { DataManagement, ProjectsPage } from "./management";
+import { OperationsModule } from "./operations";
 import { Empty } from "./ui";
 const groups = [
   {
@@ -50,6 +57,17 @@ const groups = [
     items: [
       { href: "/materials", label: "Material Log", icon: Package },
       { href: "/inventory", label: "Inventory", icon: Layers },
+      { href: "/steel", label: "Steel Consumption", icon: Weight },
+      { href: "/concrete", label: "Concrete Consumption", icon: Boxes },
+    ],
+  },
+  {
+    label: "SITE OPERATIONS",
+    items: [
+      { href: "/stores", label: "Stores", icon: Warehouse },
+      { href: "/work", label: "Daily Work", icon: NotebookPen },
+      { href: "/accounts", label: "Site Accounts", icon: Wallet },
+      { href: "/issues", label: "Reports / Issues", icon: CircleAlert },
     ],
   },
   {
@@ -61,7 +79,8 @@ const groups = [
   },
 ];
 export function AppShell() {
-  const { db, ready, error, selection, selectWorkspace } = useStore();
+  const { db, ready, error, selection, selectWorkspace, role, setRole } =
+    useStore();
   const pathname = usePathname();
   const { companyId: selectedCompany, projectId: selectedProject } = selection;
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -122,6 +141,18 @@ export function AppShell() {
       <RecordsPage kind="employees" {...props} />
     ) : pathname === "/labour" ? (
       <RecordsPage kind="labour" {...props} />
+    ) : pathname === "/steel" ? (
+      <RecordsPage kind="transactions" steelOnly {...props} />
+    ) : ["/stores", "/work", "/accounts", "/issues", "/concrete"].includes(
+        pathname,
+      ) ? (
+      <OperationsModule
+        module={
+          pathname.slice(1) as
+            "stores" | "work" | "accounts" | "issues" | "concrete"
+        }
+        {...props}
+      />
     ) : pathname === "/materials" ? (
       <RecordsPage kind="transactions" {...props} />
     ) : (
@@ -210,6 +241,20 @@ export function AppShell() {
             <strong>{current?.label ?? "ConStat"}</strong>
           </div>
           <div className="topbar-right">
+            <label className="role-switcher">
+              <span>View as · testing only</span>
+              <select
+                aria-label="Testing role"
+                title="Local testing only — not authentication or security"
+                value={role}
+                onChange={(e) =>
+                  setRole(e.target.value as "Super Admin" | "Employee")
+                }
+              >
+                <option>Super Admin</option>
+                <option>Employee</option>
+              </select>
+            </label>
             <span className="local-status">
               <span />
               Saved locally
@@ -254,7 +299,7 @@ export function AppShell() {
             Manage projects <ChevronRight size={14} />
           </Link>
         </div>
-        <main key={`${pathname}:${projectId}`} id="main-content">
+        <main key={`${pathname}:${projectId}:${role}`} id="main-content">
           {error && (
             <div className="error-message" role="alert">
               {error}

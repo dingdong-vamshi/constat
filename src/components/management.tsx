@@ -35,7 +35,8 @@ export function ProjectsPage({
   onSelectCompany: (id: string) => void;
   onSelectProject: (id: string) => void;
 }) {
-  const { db, repo } = useStore();
+  const { db, repo, role } = useStore();
+  const isAdmin = role === "Super Admin";
   const [editing, setEditing] = useState<
     | { kind: "companies"; record?: Company }
     | { kind: "projects"; record?: Project }
@@ -52,7 +53,10 @@ export function ProjectsPage({
         title="Companies & projects"
         description="Organize your sites. Each project keeps its own records and statistics."
         action={
-          <Button onClick={() => setEditing({ kind: "companies" })}>
+          <Button
+            disabled={!isAdmin}
+            onClick={() => setEditing({ kind: "companies" })}
+          >
             <Plus size={16} />
             Add company
           </Button>
@@ -69,7 +73,10 @@ export function ProjectsPage({
         rows={db.companies}
         empty="No companies yet."
         action={
-          <Button onClick={() => setEditing({ kind: "companies" })}>
+          <Button
+            disabled={!isAdmin}
+            onClick={() => setEditing({ kind: "companies" })}
+          >
             Add company
           </Button>
         }
@@ -98,6 +105,7 @@ export function ProjectsPage({
             title: "Actions",
             render: (r) => (
               <RowActions
+                disabled={!isAdmin}
                 onEdit={() => setEditing({ kind: "companies", record: r })}
                 onDelete={() =>
                   setDeleting({ kind: "companies", id: r.id, name: r.name })
@@ -116,7 +124,7 @@ export function ProjectsPage({
         </h2>
         <Button
           variant="secondary"
-          disabled={!companyId}
+          disabled={!companyId || !isAdmin}
           onClick={() => setEditing({ kind: "projects" })}
         >
           <Plus size={16} />
@@ -128,7 +136,7 @@ export function ProjectsPage({
         empty="No projects yet."
         action={
           <Button
-            disabled={!companyId}
+            disabled={!companyId || !isAdmin}
             onClick={() => setEditing({ kind: "projects" })}
           >
             Add project
@@ -165,6 +173,7 @@ export function ProjectsPage({
             title: "Actions",
             render: (r) => (
               <RowActions
+                disabled={!isAdmin}
                 onEdit={() => setEditing({ kind: "projects", record: r })}
                 onDelete={() =>
                   setDeleting({ kind: "projects", id: r.id, name: r.name })
@@ -188,7 +197,7 @@ export function ProjectsPage({
         open={!!deleting}
         onClose={() => setDeleting(null)}
         title={`Delete ${deleting?.name}?`}
-        description={`This permanently deletes this ${deleting?.kind === "companies" ? "company, all its projects" : "project"} and ALL associated machines, diesel logs, employees, attendance, and material transactions. Export a backup first if needed.`}
+        description={`This permanently deletes this ${deleting?.kind === "companies" ? "company, all its projects" : "project"} and ALL associated machines, attendance, materials, store inventory and usage, work logs, accounts, issues, concrete, and all other project records. Export a backup first if needed.`}
         onConfirm={() => {
           try {
             repo.remove(deleting!.kind, deleting!.id);
@@ -203,7 +212,7 @@ export function ProjectsPage({
   );
 }
 export function DataManagement() {
-  const { db, repo, clearError } = useStore();
+  const { db, repo, clearError, role } = useStore();
   const [action, setAction] = useState<"sample" | "reset" | "import" | null>(
     null,
   );
@@ -302,6 +311,7 @@ export function DataManagement() {
             <p>{c.description}</p>
             <Button
               variant={c.title.startsWith("Reset") ? "danger" : "secondary"}
+              disabled={role === "Employee" && c.button !== "Export All Data"}
               onClick={c.run}
             >
               {c.button}
@@ -327,7 +337,8 @@ export function DataManagement() {
       )}
       <div className="info-note">
         <p>
-          Local beta · No sign-in or cloud sync. Clearing browser site data
+          Local beta · The role selector is for testing only; it is not
+          authentication. No sign-in or cloud sync. Clearing browser site data
           removes your records. Keep exported backups before changing browsers
           or resetting data.
         </p>
@@ -356,7 +367,7 @@ export function DataManagement() {
               action === "reset"
                 ? emptyDatabase()
                 : action === "sample"
-                  ? createSeed(samplePhoto())
+                  ? createSeed(samplePhoto(), samplePhoto("bill"))
                   : pending,
             );
             clearError();

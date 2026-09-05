@@ -108,9 +108,20 @@ export function Badge({ children }: { children: React.ReactNode }) {
   return (
     <span
       className={clsx("badge", {
-        "badge-green": ["Active", "Present", "Received"].includes(status),
-        "badge-amber": ["Maintenance", "On Hold"].includes(status),
-        "badge-red": ["Absent", "Inactive"].includes(status),
+        "badge-green": [
+          "Active",
+          "Present",
+          "Received",
+          "Resolved",
+          "Completed",
+        ].includes(status),
+        "badge-amber": [
+          "Maintenance",
+          "On Hold",
+          "In Progress",
+          "High",
+        ].includes(status),
+        "badge-red": ["Absent", "Inactive", "Critical"].includes(status),
       })}
     >
       <span />
