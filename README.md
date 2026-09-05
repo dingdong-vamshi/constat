@@ -70,3 +70,20 @@ Replace the storage/repository implementation with a cloud service while keeping
 4. Open the production URL. A new browser starts with sample data. To transfer existing localhost records, export from localhost Data Management and import the JSON on the production URL.
 
 Vercel hosts the application code, not the user's operational database. Records and photos remain in the visiting browser's localStorage. They survive refresh and normal redeploys on the same origin, but do not sync across devices, browsers, preview URLs, or custom domains. Clearing browser site data removes them. Use JSON backups to move or protect records.
+
+## Expanded V1 modules
+
+The local beta now includes `/stores` (owned equipment and daily usage), `/work` (activity types and work logs), `/accounts` (expenses, receipts and configurable categories), `/issues` (reporting and resolution), `/steel` (a filtered view of the shared material ledger), and `/concrete` (consumption by area). All module tables support CRUD, project-scoped filtering, and pagination. Dashboard operation totals and breakdowns come from these records.
+
+- **Stores:** marking equipment used does not reduce owned quantity. One usage record per item/date; quantities cannot exceed ownership. Referenced items can be deactivated but not deleted. Reducing ownership below an existing recorded usage quantity is rejected.
+- **Steel:** new consumption requires Foundation, Structural, or Super Structural. Entries share the material transaction collection and reduce its stock.
+- **Accounts:** `SITE-0001`-style numbers are generated per project. A persisted project counter prevents reusing deleted numbers. Accounts are entered independently; recording diesel or a material receipt does not automatically add an account entry or double-count expenses.
+- **Issues:** resolution dates are set when resolved, and cleared when reopened. Related machines/items must belong to the project.
+- **Work:** quantities are optional; measured totals are grouped by activity and unit to avoid adding unlike units. New projects get Earthwork, Blasting and default account categories. Existing projects can load defaults in the configuration tabs or create custom ones.
+- **Roles:** the header's Super Admin / Employee selector simulates permissions locally. Employees can record operations while master configuration and full database replacement are restricted to Super Admin. This is not authentication or a security boundary.
+
+### Saved-data compatibility
+
+The JSON database schema is now version 2; the product remains V1 beta. The existing storage key is retained. `src/lib/migrations.ts` reads earlier version-1 backups and saved data without deleting records. Historical diesel entries without a bill are marked as missing, and historical steel consumption without an area is marked unclassified. Editing those records requires completing the newly required fields. No historical photo or area is invented. New collections start empty until populated or sample data is explicitly loaded.
+
+A shared `PhotoUpload` component compresses meter photos, diesel bills, optional account receipts, and optional issue photos. Both meter and bill photos are required for new diesel entries. Backups include every new entity, project configuration, and stored image. `src/lib/seed.ts` remains the only sample-data source, with clearly labeled meter and receipt illustrations.
