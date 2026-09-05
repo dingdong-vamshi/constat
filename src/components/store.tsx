@@ -8,9 +8,12 @@ import {
 } from "react";
 import { BrowserStorage, Repository, STORAGE_KEY } from "@/lib/repository";
 import { createSeed, samplePhoto } from "@/lib/seed";
+import { TestingRole } from "@/lib/permissions";
 import { toast } from "sonner";
 const Context = createContext<{
   repo: Repository;
+  role: TestingRole;
+  setRole: (role: TestingRole) => void;
   ready: boolean;
   error: string;
   clearError: () => void;
@@ -19,6 +22,19 @@ const Context = createContext<{
 } | null>(null);
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [repo] = useState(() => new Repository(new BrowserStorage()));
+  const [role, updateRole] = useState<TestingRole>("Super Admin");
+  const [rolePreferences] = useState(
+    () => new BrowserStorage("constat.testing-role.v1"),
+  );
+  function setRole(next: TestingRole) {
+    repo.setRole(next);
+    updateRole(next);
+    try {
+      rolePreferences.write(next);
+    } catch {
+      toast.error("Testing role could not be remembered.");
+    }
+  }
   const [selection, setSelection] = useState({ companyId: "", projectId: "" });
   const [preferences] = useState(
     () => new BrowserStorage("constat.workspace.v1"),
@@ -39,7 +55,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     queueMicrotask(() => {
       try {
-        if (!repo.hydrate()) repo.replace(createSeed(samplePhoto()));
+        if (!repo.hydrate())
+          repo.replace(createSeed(samplePhoto(), samplePhoto("bill")));
       } catch (e) {
         setError(
           `Could not load saved data. ${e instanceof Error ? e.message : "Invalid data."} Use Data Management to restore a backup or reset. The saved data has not been overwritten.`,
@@ -62,6 +79,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       } catch {
         /* Missing or invalid preferences do not affect operational data. */
       }
+      try {
+        const savedRole = rolePreferences.read();
+        if (savedRole === "Employee" || savedRole === "Super Admin") {
+          repo.setRole(savedRole);
+          updateRole(savedRole);
+        }
+      } catch {
+        /* Fall back to Super Admin for local testing. */
+      }
       setReady(true);
     });
     const handler = (event: StorageEvent) => {
@@ -74,11 +100,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
-  }, [repo, preferences]);
+  }, [repo, preferences, rolePreferences]);
   return (
     <Context.Provider
       value={{
         repo,
+        role,
+        setRole,
         ready,
         error,
         selection,

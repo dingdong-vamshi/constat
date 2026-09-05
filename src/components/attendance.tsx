@@ -232,12 +232,7 @@ function DailyAttendance({
         description="All technical attendance for this project and date will be deleted. Employee records remain."
         onConfirm={() => {
           try {
-            repo.replace({
-              ...db,
-              attendance: db.attendance.filter(
-                (r) => r.projectId !== projectId || r.date !== date,
-              ),
-            });
+            repo.clearAttendance(projectId, date);
             setDraft({});
             setConfirm(false);
             toast.success("Attendance cleared.");
