@@ -236,9 +236,21 @@ export function AppShell() {
             >
               <Menu size={21} />
             </button>
-            <span>Workspace</span>
-            <ChevronRight size={14} />
-            <strong>{current?.label ?? "ConStat"}</strong>
+            <Link
+              href="/"
+              className="mobile-header-brand"
+              aria-label="ConStat dashboard"
+            >
+              <span className="logo-mark" aria-hidden="true">
+                C<span />
+              </span>
+              <span className="mobile-brand-name">ConStat</span>
+            </Link>
+            <span className="desktop-breadcrumb">Workspace</span>
+            <ChevronRight className="desktop-breadcrumb" size={14} />
+            <strong className="desktop-breadcrumb">
+              {current?.label ?? "ConStat"}
+            </strong>
           </div>
           <div className="topbar-right">
             <label className="role-switcher">

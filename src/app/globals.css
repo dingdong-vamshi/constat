@@ -1738,3 +1738,34 @@ td strong {
     grid-column: 1/-1;
   }
 }
+
+.mobile-header-brand {
+  display: none;
+}
+@media (max-width: 850px) {
+  .breadcrumb .desktop-breadcrumb {
+    display: none;
+  }
+  .mobile-header-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    color: #111;
+    flex-shrink: 0;
+  }
+  .mobile-header-brand .logo-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 22px;
+  }
+  .mobile-header-brand .logo-mark span {
+    top: 9px;
+    background: #fff;
+  }
+  .mobile-brand-name {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+  }
+}
